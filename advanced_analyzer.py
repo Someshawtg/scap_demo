@@ -1,41 +1,55 @@
+import streamlit as st
+from PIL import Image
+import os
+
+# Check if the image file exists
+if os.path.exists("awtg-new-logo.png"):
+    image = Image.open("awtg-new-logo.png")
+    
+    # Create two columns with custom width ratios
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        # Display the smaller image in the first column
+        st.image(image, width=200)
+        
+    with col2:
+        # Display the caption in the second column on one line
+        st.markdown(
+            "<h2 style='text-align: left; white-space: nowrap;'>AWTG Smart Analytics Dashboard</h2>",
+            unsafe_allow_html=True
+        )
+else:
+    st.error("Logo file not found!")
+
+
+
+# Now import other modules and continue with the rest of your code...
+
 import os
 import re
 import json
-import uuid
-import time
-import shutil
-import hashlib
-import pickle
 import logging
-import numpy as np
-import streamlit as st
 import pandas as pd
+import numpy as np
+import shutil
+import time
+from PIL import Image
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 
-# Configure logging with detailed format
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
-)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
-
-# Custom JSON encoder to handle Timestamp objects
-class CustomEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, (pd.Timestamp, datetime)):
-            return o.isoformat()
-        return super().default(o)
 
 # Load environment variables
 load_dotenv()
@@ -44,64 +58,27 @@ PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = "telecom-demo"
 
 # Pinecone initialization
-logger.info("Initializing Pinecone...")
 pc = Pinecone(api_key=PINECONE_API_KEY)
-existing_indexes = pc.list_indexes()
-existing_index_names = [index["name"] for index in existing_indexes]
-if PINECONE_INDEX_NAME not in existing_index_names:
-    logger.info(f"Index '{PINECONE_INDEX_NAME}' not found. Creating new index.")
-    pc.create_index(
-        name=PINECONE_INDEX_NAME,
-        dimension=1536,
-        metric="euclidean",
-        spec=ServerlessSpec(cloud="aws", region="us-west-2")
-    )
-else:
-    logger.info(f"Index '{PINECONE_INDEX_NAME}' already exists.")
+if PINECONE_INDEX_NAME not in [index["name"] for index in pc.list_indexes()]:
+    pc.create_index(name=PINECONE_INDEX_NAME, dimension=1536, metric="euclidean", 
+                   spec=ServerlessSpec(cloud="aws", region="us-west-2"))
 
 # Cache directory for embeddings
 CACHE_DIR = "embedding_cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
-logger.debug(f"Cache directory set to: {CACHE_DIR}")
-
-def get_cache_key(texts):
-    hasher = hashlib.sha256()
-    for text in texts:
-        hasher.update(text.encode())
-    key = os.path.join(CACHE_DIR, f"{hasher.hexdigest()}.pkl")
-    logger.debug(f"Generated cache key: {key}")
-    return key
-
-def load_cached_embeddings(cache_key):
-    if os.path.exists(cache_key):
-        logger.debug(f"Loading cached embeddings from: {cache_key}")
-        with open(cache_key, "rb") as f:
-            return pickle.load(f)
-    logger.debug("No cached embeddings found.")
-    return None
-
-def save_embeddings_to_cache(cache_key, embeddings):
-    logger.debug(f"Saving embeddings to cache: {cache_key}")
-    with open(cache_key, "wb") as f:
-        pickle.dump(embeddings, f)
 
 class AdvancedDataAnalyzer:
     def __init__(self):
-        logger.info("Initializing AdvancedDataAnalyzer...")
-        self.model = ChatOpenAI(model="gpt-4-turbo", temperature=0.2, api_key=OPENAI_API_KEY)
+        self.model = ChatOpenAI(model="gpt-4", temperature=0.2, api_key=OPENAI_API_KEY)
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=OPENAI_API_KEY)
         self.vector_store = None
-        self._setup_prompts()
-
-    def _setup_prompts(self):
-        logger.info("Setting up analysis prompts...")
         self.analysis_prompt = ChatPromptTemplate.from_messages([
-    ("system", """Analyze telecom data and user query to:
+            ("system", """Analyze telecom data and user query to:
 1. Identify relevant metrics from: {metrics_list}
-2. Determine appropriate visualization types
+2. Determine appropriate visualization type (line, bar, heatmap, scatter, histogram, box)
 3. Select axis columns based on query intent
 
-Respond with JSON format:
+Respond STRICTLY with valid JSON format:
 {{
     "key_insights": ["list of technical insights"],
     "visualization": {{
@@ -110,54 +87,20 @@ Respond with JSON format:
             "x": "column_name", 
             "y": "column_name",
             "z": "column_name (if heatmap)",
-            "title": "auto-generated title based on query"
+            "color": "column_name (optional)",
+            "title": "auto-generated title"
         }},
-        "reasoning": "explanation of chart choice"
+        "reasoning": "chart choice explanation"
     }}
 }}"""),
-    ("human", """Dataset sample (first 3 rows):
+            ("human", """Dataset sample (first 3 rows):
 {sample}
 
 User query: {query}
 
 Current date: {current_date}""")
-])
+        ])
 
-        logger.debug("Analysis prompt setup complete.")
-
-    def start_background_embedding(self, df):
-        logger.info("Starting background embedding generation...")
-        texts = df.astype(str).values.flatten().tolist()
-        cache_key = get_cache_key(texts)
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(self._generate_embeddings, texts, cache_key)
-            st.session_state.embedding_future = future
-
-    def _generate_embeddings(self, texts, cache_key):
-        try:
-            cached_embeddings = load_cached_embeddings(cache_key)
-            if cached_embeddings:
-                logger.info("Cached embeddings found; using them.")
-                return cached_embeddings
-            logger.info("No cached embeddings; generating new embeddings.")
-            batches = [texts[i:i+200] for i in range(0, len(texts), 200)]
-            embeddings = []
-            for idx, batch in enumerate(batches):
-                logger.debug(f"Embedding batch {idx+1}/{len(batches)} with {len(batch)} texts.")
-                embeddings.extend(self.embeddings.embed_documents(batch))
-            save_embeddings_to_cache(cache_key, embeddings)
-            self.vector_store = PineconeVectorStore.from_texts(
-                texts,
-                index_name=PINECONE_INDEX_NAME,
-                embedding=self.embeddings
-            )
-            logger.info("Embedding generation complete.")
-            return embeddings
-        except Exception as e:
-            logger.error(f"Embedding generation failed: {e}")
-            return None
-
-# Cell 1: EnhancedDataProcessor
 class EnhancedDataProcessor:
     def __init__(self):
         self.column_patterns = [
@@ -172,24 +115,20 @@ class EnhancedDataProcessor:
             (r'(throughput|thpt|tput)', 'Throughput'),
             (r'(utilization|usage)', 'Utilization')
         ]
-        
+
     def process_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Dynamically process dataframe with intelligent column detection"""
-        # Standardize column names
+        # Clean and standardize column names
         df.columns = [col.strip().lower().replace(' ', '_') for col in df.columns]
-        
-        # Dynamic column mapping
         column_mapping = {}
         for col in df.columns:
             for pattern, target in self.column_patterns:
                 if re.search(pattern, col, re.IGNORECASE):
-                    if col not in column_mapping:  # First match wins
-                        column_mapping[col] = target
-                        break
-                        
+                    column_mapping[col] = target
+                    logger.info(f"Mapping column '{col}' to '{target}'")
+                    break
         df.rename(columns=column_mapping, inplace=True)
         
-        # Auto-detect temporal columns
+        # Convert temporal columns and extract features
         temporal_cols = [c for c in df.columns if c in ['measurementtime', 'date', 'timestamp']]
         if temporal_cols:
             primary_time_col = temporal_cols[0]
@@ -197,319 +136,269 @@ class EnhancedDataProcessor:
             df['hour'] = df[primary_time_col].dt.hour
             df['dayofweek'] = df[primary_time_col].dt.day_name()
             df['week'] = df[primary_time_col].dt.isocalendar().week
+            logger.info(f"Processed time column '{primary_time_col}' with new features: hour, dayofweek, week")
             
-        # Auto-detect numeric columns
-        self.numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-        
-        # Auto-handle missing values
+        # Fill missing values
+        numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
         for col in df.columns:
             if df[col].isnull().any():
-                if col in self.numeric_cols:
-                    df[col].fillna(df[col].median(), inplace=True)
-                else:
-                    df[col].fillna('Unknown', inplace=True)
-                    
+                fill_val = df[col].median() if col in numeric_cols else 'Unknown'
+                df[col].fillna(fill_val, inplace=True)
+                logger.info(f"Filling missing values in '{col}' with '{fill_val}'")
         return df
 
-# Cell 3: InteractiveVisualizer
 class InteractiveVisualizer:
     def __init__(self):
         self.chart_registry = {
-            'line': self._create_line_chart,
-            'bar': self._create_bar_chart,
-            'heatmap': self._create_heatmap,
-            'scatter': self._create_scatter,
-            'histogram': self._create_histogram,
-            'box': self._create_box_plot
+            'line': px.line,
+            'linechart': px.line,
+            'bar': px.bar,
+            'barchart': px.bar,
+            'heatmap': px.density_heatmap,
+            'scatter': px.scatter,
+            'histogram': px.histogram,
+            'box': px.box,
+            'boxplot': px.box
         }
 
     def create_visualization(self, df: pd.DataFrame, chart_spec: dict) -> go.Figure:
         try:
-            chart_type = chart_spec['chart_type']
+            chart_type = chart_spec['chart_type'].lower().replace('_', '')
             params = chart_spec.get('parameters', {})
+            logger.info(f"Creating {chart_type} chart with parameters: {params}")
             
-            # Validate required parameters
-            required_params = {
-                'line': ['x', 'y'],
-                'bar': ['x', 'y'],
-                'scatter': ['x', 'y'],
-                'heatmap': ['x', 'y', 'z'],
-                'histogram': ['x'],
-                'box': ['y']
-            }.get(chart_type, [])
+            # Normalize chart type names
+            chart_type = self._normalize_chart_type(chart_type)
             
-            for param in required_params:
-                if param not in params or params[param] not in df.columns:
-                    raise ValueError(f"Missing required parameter: {param}")
+            # Validate parameters
+            validated_params = self._validate_parameters(df, chart_type, params)
             
-            # Create visualization
-            fig = self.chart_registry[chart_type](df, params)
-            fig.update_layout(height=400, margin=dict(l=20, r=20, t=40, b=20))
+            fig = self.chart_registry[chart_type](df, **validated_params)
+            fig.update_layout(
+                height=400,
+                width = 1000,
+                margin=dict(l=20, r=20, t=40, b=20),
+                hovermode="x unified"
+            )
+            logger.info(f"Chart created successfully: {chart_type} with {validated_params}")
             return fig
-            
         except Exception as e:
-            return self._create_error_visualization(str(e))
+            logger.error(f"Visualization error: {str(e)}")
+            return self._error_figure(str(e))
 
-    def _is_temporal(self, df, col):
-        return pd.api.types.is_datetime64_any_dtype(df[col]) if col in df.columns else False
+    def _normalize_chart_type(self, chart_type: str) -> str:
+        type_map = {
+            'linechart': 'line',
+            'barchart': 'bar',
+            'boxplot': 'box'
+        }
+        normalized = type_map.get(chart_type, chart_type)
+        logger.info(f"Normalized chart type: {chart_type} to {normalized}")
+        return normalized
 
-    def _create_line_chart(self, df, params):
-        return px.line(df, x=params['x'], y=params['y'], 
-                      title=params.get('title', 'Temporal Analysis'))
+    def _validate_parameters(self, df, chart_type, params):
+        requirements = {
+            'line': ['x', 'y'],
+            'bar': ['x', 'y'],
+            'scatter': ['x', 'y'],
+            'heatmap': ['x', 'y', 'z'],
+            'histogram': ['x'],
+            'box': ['y']
+        }
+        
+        validated = {}
+        for param in requirements.get(chart_type, []):
+            if param in params and params[param] in df.columns:
+                validated[param] = params[param]
+            else:
+                error_msg = f"Missing required parameter: {param}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+                
+        # Add optional parameters
+        for param in ['color', 'facet_col', 'title']:
+            if param in params:
+                validated[param] = params[param]
+        logger.info(f"Validated parameters for {chart_type}: {validated}")
+        return validated
 
-    def _create_bar_chart(self, df, params):
-        return px.bar(df, x=params['x'], y=params['y'],
-                     title=params.get('title', 'Comparative Analysis'))
-
-    def _create_heatmap(self, df, params):
-        return px.density_heatmap(df, x=params['x'], y=params['y'], z=params['z'],
-                                 title=params.get('title', 'Correlation Analysis'))
-
-    def _create_scatter(self, df, params):
-        return px.scatter(df, x=params['x'], y=params['y'],
-                         title=params.get('title', 'Scatter Analysis'))
-
-    def _create_histogram(self, df, params):
-        return px.histogram(df, x=params['x'],
-                          title=params.get('title', 'Distribution Analysis'))
-
-    def _create_box_plot(self, df, params):
-        return px.box(df, y=params['y'],
-                     title=params.get('title', 'Statistical Distribution'))
-
-    def _create_error_visualization(self, error_msg):
+    def _error_figure(self, message: str) -> go.Figure:
         fig = go.Figure()
-        fig.add_annotation(text=f"Visualization Error: {error_msg}",
-                          xref="paper", yref="paper",
-                          x=0.5, y=0.5, showarrow=False)
+        fig.add_annotation(
+            text=f"Visualization Error: {message}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="red")
+        )
         return fig
 
-# Cell 2: TelecomAnalysisPipeline
 class TelecomAnalysisPipeline:
     def __init__(self):
         self.analyzer = AdvancedDataAnalyzer()
-        self.processor = EnhancedDataProcessor() 
-        self.chart_requirements = {
-            'line': {'x_type': 'temporal', 'y_type': 'numeric'},
-            'bar': {'x_type': 'categorical', 'y_type': 'numeric'},
-            'heatmap': {'x_type': 'categorical', 'y_type': 'categorical', 'z_type': 'numeric'},
-            'scatter': {'x_type': 'numeric', 'y_type': 'numeric'},
-            'histogram': {'x_type': 'numeric'},
-            'box': {'y_type': 'numeric'}
-        }
-
-
-    def _create_error_response(self, error: Exception) -> dict:
-        """Create standardized error response"""
-        return {
-            'processed_data': None,
-            'analysis': {
-                'error': True,
-                'message': str(error),
-                'visualization': {'types': [], 'parameters': {}}
-            },
-            'visualizations': [],
-            'insights': []
-        }
-
-    def _generate_insights(self, df: pd.DataFrame, query: str) -> list:
-        """Generate query-aware insights"""
-        insights = []
-        
-        # Example insight generation
-        if 'RRC.EstabAtt' in df.columns:
-            insights.append(
-                f"RRC Attempts: Avg {df['RRC.EstabAtt'].mean():.1f} "
-                f"(Max {df['RRC.EstabAtt'].max()}, Min {df['RRC.EstabAtt'].min()})"
-            )
-            
-        if 'DL.Throughput' in df.columns:
-            insights.append(
-                f"Downlink Throughput: {df['DL.Throughput'].mean():.2f} Mbps average"
-            )
-            
-        return insights
-
-    def _auto_detect_columns(self, df):
-        """Dynamically detect column types and metrics"""
-        column_types = {}
-        for col in df.columns:
-            if pd.api.types.is_datetime64_any_dtype(df[col]):
-                column_types[col] = 'temporal'
-            elif pd.api.types.is_numeric_dtype(df[col]):
-                column_types[col] = 'numeric'
-            else:
-                column_types[col] = 'categorical'
-                
-        return {
-            'temporal': [c for c, t in column_types.items() if t == 'temporal'],
-            'numeric': [c for c, t in column_types.items() if t == 'numeric'],
-            'categorical': [c for c, t in column_types.items() if t == 'categorical']
-        }
-
-    def _generate_dynamic_specs(self, df):
-        """Generate visualization suggestions based on data characteristics"""
-        column_types = self._auto_detect_columns(df)
-        specs = []
-        
-        # Line/Time Series Charts
-        if column_types['temporal'] and column_types['numeric']:
-            specs.append({
-                'chart_type': 'line',
-                'parameters': {
-                    'x': column_types['temporal'][0],
-                    'y': column_types['numeric'][0],
-                    'title': f"{column_types['numeric'][0]} Over Time"
-                }
-            })
-            
-        # Bar Charts
-        if column_types['categorical'] and column_types['numeric']:
-            specs.append({
-                'chart_type': 'bar',
-                'parameters': {
-                    'x': column_types['categorical'][0],
-                    'y': column_types['numeric'][0],
-                    'title': f"{column_types['numeric'][0]} Distribution"
-                }
-            })
-            
-        # Heatmaps
-        if len(column_types['categorical']) >= 2 and column_types['numeric']:
-            specs.append({
-                'chart_type': 'heatmap',
-                'parameters': {
-                    'x': column_types['categorical'][0],
-                    'y': column_types['categorical'][1],
-                    'z': column_types['numeric'][0],
-                    'title': "Activity Correlation"
-                }
-            })
-            
-        # Scatter Plots
-        if len(column_types['numeric']) >= 2:
-            specs.append({
-                'chart_type': 'scatter',
-                'parameters': {
-                    'x': column_types['numeric'][0],
-                    'y': column_types['numeric'][1],
-                    'title': "Metric Correlation"
-                }
-            })
-            
-        return specs
+        self.processor = EnhancedDataProcessor()
+        self.visualizer = InteractiveVisualizer()
 
     def process_query(self, df: pd.DataFrame, query: str) -> dict:
-        # First check for conversational queries
+        logger.info(f"Received user query: {query}")
         if self._is_conversational_query(query):
-            return self._handle_conversational_query(query)
-            
-        # Proceed with technical analysis for other queries
+            logger.info("Query identified as conversational; skipping full analysis.")
+            return {'analysis': {'conversational': True}, 'visualizations': [], 'insights': []}
+        
+        # Process data and run through AI analysis
         processed_df = self.processor.process_dataframe(df.copy())
+        logger.info("Data processing complete. Beginning AI analysis.")
         analysis_result = self._get_ai_analysis(processed_df, query)
+        logger.info(f"AI analysis result: {analysis_result}")
+        
         visualization = self._generate_visualization(processed_df, analysis_result, query)
+        insights = self._generate_insights(processed_df, query)
+        logger.info(f"Generated insights: {insights}")
         
         return {
             'processed_data': processed_df,
             'analysis': analysis_result,
             'visualizations': [visualization] if visualization else [],
-            'insights': self._generate_insights(processed_df, query)
+            'insights': insights
         }
-
-    def _is_conversational_query(self, query: str) -> bool:
-        query = query.lower().strip()
-        greetings = {"hello", "hi", "hey", "good morning", "good afternoon", 
-                   "how are you", "what's up"}
-        return any(greeting in query for greeting in greetings)
-
-    def _handle_conversational_query(self, query: str) -> dict:
-        return {
-            'processed_data': None,
-            'analysis': {'conversational': True},
-            'visualizations': [],
-            'insights': []
-        }
-    
 
     def _generate_visualization(self, df, analysis, query):
-        """Enhanced visualization generator with query context"""
         try:
-            chart_type = analysis.get('visualization', {}).get('type', 'line')
-            params = analysis.get('visualization', {}).get('parameters', {})
+            vis_config = analysis.get('visualization', {})
+            chart_type = vis_config.get('type', 'line').lower().replace('_', '')
+            params = vis_config.get('parameters', {})
+            logger.info(f"AI suggested chart type: {chart_type} with parameters: {params}")
             
-            # Ensure required parameters exist
-            base_params = {
-                'title': f"{query} Analysis" if query else "Network Analysis",
-                'x': 'MeasurementTime',
-                'y': 'DL.Throughput'
+            # Auto-detect parameters if missing
+            default_params = {
+                'title': f"{query} Analysis",
+                'x': self._detect_axis(df, 'x', params.get('x')),
+                'y': self._detect_axis(df, 'y', params.get('y')),
+                'z': params.get('z', self._detect_secondary_metric(df))
             }
+            logger.info(f"Default parameters before merge: {default_params}")
             
-            return InteractiveVisualizer().create_visualization(
+            # Merge AI suggestions with defaults
+            final_params = {**default_params, **params}
+            logger.info(f"Final parameters after merging AI suggestions: {final_params}")
+            
+            # Clean parameters: keep only those columns that exist in df
+            final_params = {k: v for k, v in final_params.items() if v in df.columns}
+            logger.info(f"Cleaned final parameters: {final_params}")
+            
+            # Log the AI's reasoning behind the chart selection
+            reasoning = vis_config.get('reasoning', 'No reasoning provided')
+            logger.info(f"Visualization reasoning from AI: {reasoning}")
+            
+            return self.visualizer.create_visualization(
                 df,
-                {'chart_type': chart_type, 'parameters': {**base_params, **params}}
+                {'chart_type': chart_type, 'parameters': final_params}
             )
-        except KeyError as e:
-            logger.error(f"Missing visualization parameter: {str(e)}")
-            return None
-
-
-    def _get_ai_analysis(self, df, query):
-        sample_data = df.head(3).to_string()
-        metrics = ", ".join(df.columns.tolist())
-        
-        chain = self.analyzer.analysis_prompt | self.analyzer.model | StrOutputParser()
-        response = chain.invoke({
-            "sample": sample_data,
-            "query": query,
-            "current_date": datetime.now().strftime("%Y-%m-%d"),
-            "metrics_list": metrics
-        })
-        
-        try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            logger.error("Failed to parse AI response")
-            return {"error": "Analysis failed"}
-
-    def _generate_ai_visualization(self, df, analysis, query):  # Add query parameter
-        try:
-            if "visualization" not in analysis:
-                return None
-                
-            chart_type = analysis["visualization"]["type"]
-            params = analysis["visualization"]["parameters"]
-            
-            # Validate columns exist in dataframe
-            valid_params = {}
-            for param in ['x', 'y', 'z']:
-                if param in params and params[param] in df.columns:
-                    valid_params[param] = params[param]
-            
-            # Add title from analysis or use query-based title
-            valid_params['title'] = params.get(
-                'title', 
-                f"{query} Analysis" if query else "Network Performance Analysis"
-            )
-            
-            return InteractiveVisualizer().create_visualization(
-                df, 
-                {'chart_type': chart_type, 'parameters': valid_params}
-            )
-            
         except Exception as e:
             logger.error(f"Visualization generation failed: {str(e)}")
             return None
 
-    def _generate_data_driven_insights(self, df):
+    def _detect_axis(self, df, axis_type, suggested):
+        if suggested and suggested in df.columns:
+            logger.info(f"Using suggested {axis_type}-axis: {suggested}")
+            return suggested
+        if axis_type == 'x':
+            detected = self._detect_time_column(df) or 'index'
+            logger.info(f"Auto-detected {axis_type}-axis: {detected}")
+            return detected
+        detected = self._detect_primary_metric(df) or df.columns[-1]
+        logger.info(f"Auto-detected {axis_type}-axis: {detected}")
+        return detected
+
+    def _detect_time_column(self, df):
+        time_cols = ['measurementtime', 'timestamp', 'date']
+        # Create a mapping: lower-case -> actual column name
+        col_mapping = {col.lower(): col for col in df.columns}
+        for t in time_cols:
+            if t in col_mapping:
+                logger.info(f"Detected time column: {col_mapping[t]}")
+                return col_mapping[t]
+        logger.info("Detected time column: None")
+        return None
+
+    def _detect_primary_metric(self, df):
+        metrics = ['dl.throughput', 'rrc.estabatt', 'drb.estabatt', 'latency']
+        for m in metrics:
+            # Do a case-insensitive check
+            for col in df.columns:
+                if col.lower() == m:
+                    logger.info(f"Detected primary metric for y-axis: {col}")
+                    return col
+        logger.info("Detected primary metric for y-axis: None")
+        return None
+
+    def _detect_secondary_metric(self, df):
+        primary = self._detect_primary_metric(df)
+        for col in df.columns:
+            if col != primary:
+                logger.info(f"Detected secondary metric: {col}")
+                return col
+        return None
+
+    def _get_ai_analysis(self, df, query):
+        try:
+            chain = self.analyzer.analysis_prompt | self.analyzer.model | StrOutputParser()
+            response = chain.invoke({
+                "sample": df.head(3).to_string(),
+                "query": query,
+                "current_date": datetime.now().strftime("%Y-%m-%d"),
+                "metrics_list": ", ".join(df.columns.tolist())
+            })
+            logger.info(f"Raw AI response: {response}")
+            # Clean JSON response
+            json_str = re.sub(r'(?i)^[^{]*', '', response)  # Remove non-JSON prefixes
+            json_str = re.sub(r'[^}]*$', '', json_str)      # Remove non-JSON suffixes
+            
+            analysis = json.loads(json_str)
+            logger.info(f"Parsed AI analysis: {analysis}")
+            return analysis
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed. Raw response: {response}")
+            return {"error": "Analysis failed", "raw_response": response}
+        except Exception as e:
+            logger.error(f"Analysis failed: {str(e)}")
+            return {"error": str(e)}
+
+    def _generate_insights(self, df: pd.DataFrame, query: str) -> list:
         insights = []
+        time_col = self._detect_time_column(df)
+        
+        if time_col:
+            time_range = f"from {df[time_col].min()} to {df[time_col].max()}"
+            insights.append(f"Data covers {time_range}")
+            logger.info(f"Insight: Data covers {time_range}")
+            
         if 'RRC.EstabAtt' in df.columns:
-            insights.append(f"RRC Attempts: Max {df['RRC.EstabAtt'].max()}, Min {df['RRC.EstabAtt'].min()}")
+            rrc_mean = df['RRC.EstabAtt'].mean()
+            rrc_max = df['RRC.EstabAtt'].max()
+            rrc_min = df['RRC.EstabAtt'].min()
+            insight = f"RRC Attempts: Avg {rrc_mean:.1f} (Max {rrc_max}, Min {rrc_min})"
+            insights.append(insight)
+            logger.info(f"Insight: {insight}")
+            
         if 'DL.Throughput' in df.columns:
-            insights.append(f"Throughput Avg: {df['DL.Throughput'].mean():.2f} Mbps")
+            dl_mean = df['DL.Throughput'].mean()
+            insight = f"Downlink Throughput: {dl_mean:.2f} Mbps average"
+            insights.append(insight)
+            logger.info(f"Insight: {insight}")
+            
         return insights
 
+    def _is_conversational_query(self, query: str) -> bool:
+        # Use regex with word boundaries to avoid matching substrings like "hi" in "histogram"
+        greetings = {"hello", "hi", "hey", "good morning", "good afternoon", "how are you", "what's up"}
+        query_lower = query.lower().strip()
+        for greeting in greetings:
+            if re.search(r'\b' + re.escape(greeting) + r'\b', query_lower):
+                logger.info(f"Found conversational greeting '{greeting}' in query.")
+                return True
+        return False
 
-# Cell 4: TelecomAnalyticsUI
 class TelecomAnalyticsUI:
     def __init__(self):
         self.pipeline = TelecomAnalysisPipeline()
@@ -524,101 +413,93 @@ class TelecomAnalyticsUI:
             st.session_state.current_query = None
 
     def render_interface(self):
-        st.set_page_config(page_title="Telecom Analytics", layout="wide")
-        st.title("📈 Dynamic Network Analytics Dashboard")
         
-        # Immediate message display
+        #st.title("📈 AWTG Smart Analytics Dashboard")
         self._display_messages()
         
         with st.sidebar:
-            uploaded_file = st.file_uploader("Upload Network Data", 
-                                           type=["csv", "xlsx", "parquet"])
+            uploaded_file = st.file_uploader("Upload Network Data", type=["csv", "xlsx", "parquet"])
             if uploaded_file:
                 self._handle_file_upload(uploaded_file)
 
-        self._handle_user_input()
-
-    def _display_messages(self):
-        # Display all messages except current processing
-        for msg in st.session_state.messages:
-            self._render_message(msg)
-        
-        # Show current processing state
-        if st.session_state.current_query:
-            with st.chat_message("user"):
-                st.markdown(st.session_state.current_query)
-            with st.chat_message("assistant"):
-                with st.spinner("Analyzing network patterns..."):
-                    st.empty()
-
-    def _handle_user_input(self):
         if prompt := st.chat_input("Ask about network performance..."):
             self._process_query(prompt)
             st.rerun()
 
+    def _handle_file_upload(self, file):
+        try:
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file)
+            elif file.name.endswith(('.xlsx', '.xls')):
+                df = pd.read_excel(file)
+            elif file.name.endswith('.parquet'):
+                df = pd.read_parquet(file)
+            else:
+                raise ValueError("Unsupported file format")
+                
+            st.session_state.processed_df = self.pipeline.processor.process_dataframe(df)
+            st.success(f"Successfully loaded {len(df)} records")
+            logger.info(f"File '{file.name}' uploaded successfully with {len(df)} records")
+        except Exception as e:
+            st.error(f"Error loading file: {str(e)}")
+            logger.error(f"Error loading file: {str(e)}")
+
     def _process_query(self, query):
         try:
-            # Store current query separately
             st.session_state.current_query = query
-            
+            logger.info(f"User submitted query: {query}")
             if st.session_state.processed_df is None:
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": "⚠️ Please upload a dataset first",
                     "visualizations": []
                 })
+                logger.info("No dataset found. Prompting user to upload a dataset.")
                 return
 
-            # Process query
-            result = self.pipeline.process_query(
-                st.session_state.processed_df,
-                query
-            )
-            
-            # Atomic update of messages
+            result = self.pipeline.process_query(st.session_state.processed_df, query)
             st.session_state.messages.append({
                 "role": "user",
                 "content": query,
                 "visualizations": []
             })
-            st.session_state.messages.append(
-                self._format_response(result)
-            )
-
+            st.session_state.messages.append(self._format_response(result))
+            logger.info("Completed processing the query and generated analysis and visualization.")
         except Exception as e:
             st.error(f"Processing error: {str(e)}")
-        finally:
-            st.session_state.current_query = None
+            logger.error(f"Processing error: {str(e)}")
 
     def _format_response(self, result):
-        # Handle conversational responses first
         if result.get('analysis', {}).get('conversational'):
-            return self._format_conversational_response()
-        
-        content = []
-        visualizations = result.get("visualizations", [])
-
-        # Error handling
-        if result.get('analysis', {}).get('error'):
-            content.append("⚠️ **Analysis Limitations**")
-            content.append("Some metrics could not be analyzed due to:")
-            content.append("- Missing required data columns")
-            content.append("- Insufficient temporal coverage")
-        else:
-            # Only show technical headers when there's actual technical content
-            if result.get('insights') or visualizations:
-                content.append("## Network Analysis Report")
+            logger.info("Formatting conversational response.")
+            return {
+                "role": "assistant",
+                "content": self._format_conversational_response(),
+                "visualizations": []
+            }
             
+        content = ["## Analysis Results"]
+        
+        if result.get('analysis', {}).get('error'):
+            content.extend([
+                "⚠️ **Analysis Limitations**",
+                "- Could not fully interpret the query",
+                "- Insufficient data for complete analysis",
+                f"Raw AI response: ```{result['analysis'].get('raw_response', '')}```"
+            ])
+        else:
             if result.get('insights'):
-                content.append("### Key Findings")
+                content.append("### Key Metrics")
                 content.extend(f"- {insight}" for insight in result['insights'])
-            elif not visualizations:  # Only show "no patterns" if no visualizations either
-                content.append("🔍 No significant patterns detected in current data scope")
+                
+            if 'visualization' in result.get('analysis', {}):
+                content.append("\n### Chart Selection Reasoning")
+                content.append(result['analysis']['visualization']['reasoning'])
+                logger.info(f"Chart Selection Reasoning: {result['analysis']['visualization']['reasoning']}")
 
-        # Visualization status messaging
-        if visualizations:
-            content.append("\n### Data Visualizations")
-        elif not result.get('analysis', {}).get('error'):  # Don't show suggestions if error
+        if result.get('visualizations'):
+            content.append("\n### Generated Visualizations")
+        else:
             content.append("\n🚫 No visualizations generated - try:")
             content.append("- Specifying time ranges")
             content.append("- Comparing specific metrics")
@@ -627,82 +508,47 @@ class TelecomAnalyticsUI:
         return {
             "role": "assistant",
             "content": "\n".join(content),
-            "visualizations": visualizations
+            "visualizations": result.get("visualizations", [])
         }
 
     def _format_conversational_response(self):
-        # Add time-based greeting
-        hour = datetime.now().hour
-        greeting = (
-            "Good morning" if 5 <= hour < 12 else
-            "Good afternoon" if 12 <= hour < 17 else
-            "Good evening"
-        )
-        
+        greeting = "Good morning" if 5 <= datetime.now().hour < 12 else "Good afternoon" if 12 <= datetime.now().hour < 17 else "Good evening"
         content = [
-            f"🌟 **{greeting}! Welcome to Network Analytics**",
-            "",
-            "How can I assist you with your telecom data today?",
-            "",
+            f"🌟 **{greeting}! Welcome to AWTG Analytics**",
+            "How can I assist you today?",
             "**Try these sample queries:**",
-            "- 'Compare latency between 5G and 4G nodes'",
+            "- 'Show histogram of RRC attempt frequencies'",
+            "- 'Show relationship between active UEs and throughput",
             "- 'Show throughput trends from last week'",
-            "- 'Visualize QoS level distribution by region'",
-            "",
+            "- 'Can you generate a histogram showing the distribution of DL UE Throughput Mbps?",
+            "- 'Heatmap of network activity by hour and cell'",
             "**Quick Start Guide:**",
             "1. Upload your network data file",
             "2. Ask questions about specific metrics",
             "3. Explore interactive visualizations",
-            "",
             "Need help? Just ask!"
         ]
-        
-        return {
-            "role": "assistant",
-            "content": "\n".join(content),
-            "visualizations": [],
-            "conversational": True  # Add explicit marker
-        }
+        return "\n".join(content)
 
-    def _render_message(self, msg):
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg["visualizations"]:
-                self._render_visualizations(msg["visualizations"])
-            elif msg["role"] == "assistant":
-                st.info("No graphical representation available")
+    def _display_messages(self):
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg.get("visualizations", []):
+                    self._render_visualizations(msg["visualizations"])
+                elif msg["role"] == "assistant":
+                    st.info("No graphical representation available")
 
     def _render_visualizations(self, figures):
         cols = st.columns(2)
         for idx, fig in enumerate(figures):
             with cols[idx % 2]:
-                try:
-                    if fig and isinstance(fig, go.Figure):
-                        st.plotly_chart(
-                            fig,
-                            use_container_width=True,
-                            key=f"chart_{hash(fig.to_json())}_{time.time_ns()}"
-                        )
-                except Exception as e:
-                    st.error(f"Visualization error: {str(e)}")
-
-    def _handle_file_upload(self, file):
-        try:
-            df = pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
-            st.session_state.processed_df = self.pipeline.process_query(df, "")['processed_data']
-            st.success(f"Successfully loaded {len(df)} records")
-        except Exception as e:
-            st.error(f"Error loading file: {str(e)}")
+                if fig and isinstance(fig, go.Figure):
+                    st.plotly_chart(fig, use_container_width=True, 
+                                      key=f"chart_{hash(fig.to_json())}_{time.time_ns()}")
 
 if __name__ == "__main__":
-    # Clear cache safely
     if os.path.exists("embedding_cache"):
-        try:
-            shutil.rmtree("embedding_cache")
-            logger.info("Cleared embedding cache")
-        except Exception as e:
-            logger.error(f"Cache cleanup failed: {str(e)}")
-    
-    # Initialize fresh instance
+        shutil.rmtree("embedding_cache")
     ui = TelecomAnalyticsUI()
     ui.render_interface()
