@@ -1,11 +1,11 @@
+streamlit
 pandas
 numpy
-streamlit
 plotly
 python-dotenv
 langchain-core
+langchain-community
 langchain-openai
-langchain-pinecone
 pinecone-client
 shutil
 re
