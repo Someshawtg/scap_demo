@@ -1,3 +1,31 @@
+import streamlit as st
+from PIL import Image
+import os
+
+# Check if the image file exists
+if os.path.exists("awtg-new-logo.png"):
+    image = Image.open("awtg-new-logo.png")
+    
+    # Create two columns with custom width ratios
+    col1, col2 = st.columns([1, 3])
+    
+    with col1:
+        # Display the smaller image in the first column
+        st.image(image, width=200)
+        
+    with col2:
+        # Display the caption in the second column on one line
+        st.markdown(
+            "<h2 style='text-align: left; white-space: nowrap;'>AWTG Smart Analytics Dashboard</h2>",
+            unsafe_allow_html=True
+        )
+else:
+    st.error("Logo file not found!")
+
+
+
+# Now import other modules and continue with the rest of your code...
+
 import os
 import re
 import json
@@ -6,6 +34,7 @@ import pandas as pd
 import numpy as np
 import shutil
 import time
+from PIL import Image
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
@@ -384,8 +413,8 @@ class TelecomAnalyticsUI:
             st.session_state.current_query = None
 
     def render_interface(self):
-        st.set_page_config(page_title="Telecom Analytics", layout="wide")
-        st.title("📈 AWTG Smart Analytics Dashboard")
+        
+        #st.title("📈 AWTG Smart Analytics Dashboard")
         self._display_messages()
         
         with st.sidebar:
