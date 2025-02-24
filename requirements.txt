@@ -6,4 +6,5 @@ python-dotenv
 langchain-core
 langchain-community
 langchain-openai
+langchain_pinecone
 pinecone
