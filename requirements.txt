@@ -7,9 +7,3 @@ langchain-core
 langchain-community
 langchain-openai
 pinecone-client
-shutil
-re
-os
-json
-logging
-datetime
