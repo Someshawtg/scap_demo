@@ -6,4 +6,4 @@ python-dotenv
 langchain-core
 langchain-community
 langchain-openai
-pinecone-client
+pinecone
