@@ -16,7 +16,7 @@ if os.path.exists("awtg-new-logo.png"):
     with col2:
         # Display the caption in the second column on one line
         st.markdown(
-            "<h2 style='text-align: left; white-space: nowrap;'>Smart Analytics Dashboard</h2>",
+            "<h2 style='text-align: left; white-space: nowrap;'>AWTG Telecom AI Tool</h2>",
             unsafe_allow_html=True
         )
 else:
