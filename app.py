@@ -414,7 +414,7 @@ class TelecomAnalyticsUI:
 
     def render_interface(self):
         
-        #st.title("📈 AWTG Smart Analytics Dashboard")
+        #st.title("AWTG Telecom AI Tool")
         self._display_messages()
         
         with st.sidebar:
