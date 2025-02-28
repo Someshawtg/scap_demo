@@ -1,8 +1,6 @@
-[server]
-showErrorDetails = false
+[browser]
+gatherUsageStats = false
 
-[theme]
-base = "light"
-
-[client]
-showSidebarNavigation = false
+[global]
+hideFooter = true
+hideMenu = true
