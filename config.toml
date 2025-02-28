@@ -1,0 +1,8 @@
+[server]
+showErrorDetails = false
+
+[theme]
+base = "light"
+
+[client]
+showSidebarNavigation = false
