@@ -14,15 +14,15 @@ hide_elements = """
 """
 st.markdown(hide_elements, unsafe_allow_html=True)
 
-hide_github_button = """
+hide_right_icons = """
     <style>
-    /* Hide the GitHub button (any anchor with "github.com" in its href) */
-    footer a[href*="github.com"] {
+    /* Hide all icons in the header toolbar (typically the right-hand side icons) */
+    header div[role="toolbar"] {
         display: none;
     }
     </style>
     """
-st.markdown(hide_github_button, unsafe_allow_html=True)
+st.markdown(hide_right_icons, unsafe_allow_html=True)
 
 # Check if the image file exists
 if os.path.exists("awtg-new-logo.png"):
