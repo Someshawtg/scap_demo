@@ -2,6 +2,16 @@ import streamlit as st
 from PIL import Image
 import os
 
+hide_default_format = """
+<style>
+#MainMenu {visibility: hidden; }
+footer {visibility: hidden;}
+.viewerBadge_container__1QSob {display: none !important;}
+.stDeployButton {display: none !important;}
+</style>
+"""
+st.markdown(hide_default_format, unsafe_allow_html=True)
+
 # Check if the image file exists
 if os.path.exists("awtg-new-logo.png"):
     image = Image.open("awtg-new-logo.png")
