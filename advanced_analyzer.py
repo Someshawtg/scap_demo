@@ -14,6 +14,16 @@ hide_elements = """
 """
 st.markdown(hide_elements, unsafe_allow_html=True)
 
+hide_github_button = """
+    <style>
+    /* Hide the GitHub button (any anchor with "github.com" in its href) */
+    footer a[href*="github.com"] {
+        display: none;
+    }
+    </style>
+    """
+st.markdown(hide_github_button, unsafe_allow_html=True)
+
 # Check if the image file exists
 if os.path.exists("awtg-new-logo.png"):
     image = Image.open("awtg-new-logo.png")
