@@ -16,8 +16,8 @@ st.markdown(hide_elements, unsafe_allow_html=True)
 
 hide_right_icons = """
     <style>
-    /* Hide all icons in the header toolbar (typically the right-hand side icons) */
-    header div[role="toolbar"] {
+    /* Hide the top-right toolbar using the data-testid attribute */
+    [data-testid="stToolbar"] {
         display: none;
     }
     </style>
