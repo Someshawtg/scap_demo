@@ -14,15 +14,14 @@ hide_elements = """
 """
 st.markdown(hide_elements, unsafe_allow_html=True)
 
-hide_right_icons = """
+hide_top_right_icons = """
     <style>
-    /* Hide the top-right toolbar using the data-testid attribute */
-    [data-testid="stToolbar"] {
-        display: none;
+    .stAppHeader.st-emotion-cache-12fmjuu.e4hpqof0 {
+        display: none !important;
     }
     </style>
-    """
-st.markdown(hide_right_icons, unsafe_allow_html=True)
+"""
+st.markdown(hide_top_right_icons, unsafe_allow_html=True)
 
 # Check if the image file exists
 if os.path.exists("awtg-new-logo.png"):
