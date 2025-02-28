@@ -14,14 +14,6 @@ hide_elements = """
 """
 st.markdown(hide_elements, unsafe_allow_html=True)
 
-hide_top_right_icons = """
-    <style>
-    .stAppHeader.st-emotion-cache-12fmjuu.e4hpqof0 {
-        display: none !important;
-    }
-    </style>
-"""
-st.markdown(hide_top_right_icons, unsafe_allow_html=True)
 
 # Check if the image file exists
 if os.path.exists("awtg-new-logo.png"):
