@@ -69,7 +69,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 class AdvancedDataAnalyzer:
     def __init__(self):
-        self.model = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=OPENAI_API_KEY)
+        self.model = ChatOpenAI(model="gpt-4", temperature=0.2, api_key=OPENAI_API_KEY)
         self.embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=OPENAI_API_KEY)
         self.vector_store = None
         self.analysis_prompt = ChatPromptTemplate.from_messages([
